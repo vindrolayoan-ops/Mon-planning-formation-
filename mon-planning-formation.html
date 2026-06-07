@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mon Planning Formation</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, set, onValue, remove, push } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCAzWyFXMrNWxLB0Aje8-5iL10w5gjA69k",
+    authDomain: "mon-planning-formation.firebaseapp.com",
+    databaseURL: "https://mon-planning-formation-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "mon-planning-formation",
+    storageBucket: "mon-planning-formation.firebasestorage.app",
+    messagingSenderId: "1076980401759",
+    appId: "1:1076980401759:web:ff292f669191532a1c3dea",
+    measurementId: "G-HJGR9E7VCT"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // Listen to planning
+  onValue(ref(db, 'planning'), (snap) => {
+    window.planning = snap.val() || {};
+    if (window.renderCalendar) window.renderCalendar();
+    setSyncStatus('online');
+  }, () => setSyncStatus('error'));
+
+  // Listen to centre requests
+  onValue(ref(db, 'requests'), (snap) => {
+    window.requests = snap.val() || {};
+    if (window.renderRequests) window.renderRequests();
+  });
+
+  // Listen to centres config
+  onValue(ref(db, 'centres'), (snap) => {
+    window.centresConfig = snap.val() || {};
+  });
+
+  function setSyncStatus(s) {
+    const dot = document.getElementById('syncDot');
+    const lbl = document.getElementById('syncLbl');
+    if (!dot) return;
+    dot.className = 'sync-dot ' + s;
+    if (lbl) lbl.textContent = s==='online'?'En ligne':s==='saving'?'Sauvegarde...':'Hors ligne';
+  }
+
+  window.firebaseSave    = async (key, data) => { setSyncStatus('saving'); await set(ref(db,`planning/${key}`),data); setSyncStatus('online'); };
+  window.firebaseDelete  = async (key)       => { setSyncStatus('saving'); await remove(ref(db,`planning/${key}`)); setSyncStatus('online'); };
+  window.firebaseSaveCentre = async (code, data) => set(ref(db,`centres/${code}`), data);
+  window.firebaseDeleteCentre = async (code) => remove(ref(db,`centres/${code}`));
+  window.firebasePushRequest = async (centreCode, data) => push(ref(db,`requests/${centreCode}`), data);
+  window.firebaseDeleteRequest = async (centreCode, reqId) => remove(ref(db,`requests/${centreCode}/${reqId}`));
+  window.firebaseReady = true;
+</script>
+
+<style>
+:root {
+  --ink: #0f1923; --paper: #f4f1eb; --cream: #e8e3d8;
+  --accent: #e85d26; --accent2: #1a6b9e;
+  --free: #3db87a; --busy: #e85d26; --partial: #f0b429;
+  --muted: #8a8a9a; --border: #ddd8cc;
+  --shadow: 0 2px 20px rgba(0,0,0,0.07);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:var(--paper);color:#1a1a2e;min-height:100vh;}
+
+header{background:var(--ink);color:white;padding:0 1.5rem;height:64px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 20px rgba(0,0,0,0.3);}
+.logo{font-family:'Syne',sans-serif;font-weight:800;font-size:1.3rem;letter-spacing:-0.5px;}
+.logo span{color:var(--accent);}
+.header-right{display:flex;align-items:center;gap:0.8rem;}
+.sync{display:flex;align-items:center;gap:5px;font-size:0.72rem;color:rgba(255,255,255,0.45);}
+.sync-dot{width:7px;height:7px;border-radius:50%;background:#555;transition:background 0.3s;}
+.sync-dot.online{background:var(--free);box-shadow:0 0 6px var(--free);}
+.sync-dot.saving{background:var(--partial);animation:blink 0.7s infinite;}
+.sync-dot.error{background:var(--busy);}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+
+.tabs{display:flex;background:rgba(255,255,255,0.08);border-radius:50px;padding:3px;gap:3px;}
+.tab{padding:5px 12px;border-radius:50px;border:none;font-family:'DM Sans',sans-serif;font-size:0.78rem;font-weight:500;cursor:pointer;transition:all 0.22s;color:rgba(255,255,255,0.45);background:transparent;}
+.tab.active{background:var(--accent);color:white;box-shadow:0 2px 10px rgba(232,93,38,0.4);}
+
+.container{max-width:1040px;margin:0 auto;padding:1.5rem 1rem;}
+.view{display:none;}.view.active{display:block;}
+
+.hero{text-align:center;padding:1.5rem 0 1.8rem;}
+.hero h1{font-family:'Syne',sans-serif;font-size:clamp(1.5rem,4vw,2.3rem);font-weight:800;color:var(--ink);line-height:1.15;margin-bottom:0.4rem;}
+.hero p{color:var(--muted);font-size:0.9rem;}
+
+.legend{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-bottom:1.6rem;}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:0.8rem;color:var(--muted);font-weight:500;}
+.dot{width:10px;height:10px;border-radius:50%;}
+.dot.free{background:var(--free);}.dot.busy{background:var(--busy);}.dot.partial{background:var(--partial);}.dot.empty{background:var(--border);}
+.dot.requested{background:#a855f7;}
+
+.month-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;background:white;border-radius:14px;padding:0.85rem 1.2rem;box-shadow:var(--shadow);}
+.month-nav h2{font-family:'Syne',sans-serif;font-size:1.15rem;font-weight:700;text-transform:capitalize;color:var(--ink);}
+.arrow{width:36px;height:36px;border-radius:50%;border:2px solid var(--border);background:transparent;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;transition:all 0.18s;color:var(--ink);}
+.arrow:hover{border-color:var(--accent);color:var(--accent);transform:scale(1.08);}
+
+.cal-wrap{background:white;border-radius:18px;box-shadow:var(--shadow);overflow:hidden;}
+.day-headers{display:grid;grid-template-columns:repeat(7,1fr);background:var(--ink);}
+.day-header{text-align:center;padding:0.7rem 0;font-family:'Syne',sans-serif;font-size:0.68rem;font-weight:600;color:rgba(255,255,255,0.4);letter-spacing:1px;text-transform:uppercase;}
+.days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--border);}
+
+.day-cell{background:white;min-height:82px;padding:0.45rem;cursor:pointer;transition:background 0.12s;}
+.day-cell:hover{background:#f9f9f9;}
+.day-cell.empty{background:var(--cream);cursor:default;}
+.day-cell.past{opacity:0.35;cursor:not-allowed;pointer-events:none;}
+.day-num{font-family:'Syne',sans-serif;font-size:0.85rem;font-weight:700;color:var(--ink);margin-bottom:3px;}
+.day-cell.is-today .day-num{background:var(--accent);color:white;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.75rem;}
+.status-bar{height:4px;border-radius:3px;margin-top:3px;}
+.status-bar.free{background:var(--free);}.status-bar.busy{background:var(--busy);}.status-bar.partial{background:var(--partial);}
+.status-lbl{font-size:0.6rem;font-weight:500;margin-top:2px;color:var(--muted);}
+.slots-prev{font-size:0.58rem;color:var(--accent2);font-weight:500;margin-top:2px;line-height:1.3;}
+.req-badge{background:#a855f7;color:white;font-size:0.55rem;font-weight:700;padding:1px 5px;border-radius:10px;display:inline-block;margin-top:2px;}
+
+/* MODAL */
+.overlay{position:fixed;inset:0;background:rgba(15,25,35,0.65);backdrop-filter:blur(5px);z-index:200;display:none;align-items:center;justify-content:center;padding:1rem;}
+.overlay.open{display:flex;}
+.modal{background:white;border-radius:22px;padding:1.8rem;max-width:460px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,0.2);animation:slideIn 0.28s ease;max-height:90vh;overflow-y:auto;}
+@keyframes slideIn{from{transform:translateY(18px) scale(0.97);opacity:0}to{transform:translateY(0) scale(1);opacity:1}}
+.modal-date{font-family:'Syne',sans-serif;font-size:1.2rem;font-weight:800;color:var(--ink);text-transform:capitalize;margin-bottom:0.2rem;}
+.modal-sub{color:var(--muted);font-size:0.8rem;margin-bottom:1.3rem;}
+.modal-section-title{font-family:'Syne',sans-serif;font-size:0.8rem;font-weight:700;color:var(--ink);text-transform:uppercase;letter-spacing:0.5px;margin:1rem 0 0.6rem;}
+
+.status-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0.6rem;margin-bottom:1.3rem;}
+.status-btn{padding:0.7rem 0.3rem;border-radius:13px;border:2px solid var(--border);background:white;cursor:pointer;text-align:center;transition:all 0.18s;}
+.status-btn:hover{transform:translateY(-2px);}
+.status-btn.sel-free{border-color:var(--free);background:#f0fff8;}
+.status-btn.sel-partial{border-color:var(--partial);background:#fffbf0;}
+.status-btn.sel-busy{border-color:var(--busy);background:#fff5f0;}
+.s-icon{font-size:1.2rem;margin-bottom:3px;}.s-lbl{font-size:0.7rem;font-weight:600;color:#2d2d2d;}
+
+.slots-section{margin-bottom:1.2rem;}
+.slots-title{font-family:'Syne',sans-serif;font-size:0.78rem;font-weight:700;color:var(--ink);margin-bottom:0.6rem;text-transform:uppercase;letter-spacing:0.5px;}
+.slots-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0.4rem;}
+.slot-chip{padding:0.38rem 0.2rem;border-radius:8px;border:1.5px solid var(--border);background:white;cursor:pointer;text-align:center;font-size:0.7rem;font-weight:500;color:var(--muted);transition:all 0.15s;}
+.slot-chip:hover{border-color:var(--accent2);color:var(--accent2);}
+.slot-chip.active{border-color:var(--accent2);background:#eef4fc;color:var(--accent2);font-weight:600;}
+
+.note{width:100%;border:1.5px solid var(--border);border-radius:11px;padding:0.65rem 0.9rem;font-family:'DM Sans',sans-serif;font-size:0.85rem;color:#1a1a2e;resize:none;height:64px;outline:none;transition:border-color 0.18s;margin:0.8rem 0;}
+.note:focus{border-color:var(--accent2);}
+.modal-actions{display:flex;gap:0.6rem;}
+.btn-del{padding:0.7rem 0.85rem;border:1.5px solid #fee2e2;border-radius:11px;background:white;color:#ef4444;cursor:pointer;transition:all 0.18s;font-size:0.85rem;}
+.btn-del:hover{background:#fee2e2;}
+.btn-cancel{flex:1;padding:0.7rem;border:1.5px solid var(--border);border-radius:11px;background:white;font-family:'DM Sans',sans-serif;font-size:0.85rem;cursor:pointer;color:var(--muted);transition:all 0.18s;}
+.btn-cancel:hover{border-color:var(--ink);color:var(--ink);}
+.btn-save{flex:2;padding:0.7rem;border:none;border-radius:11px;background:var(--accent);color:white;font-family:'Syne',sans-serif;font-size:0.9rem;font-weight:700;cursor:pointer;transition:all 0.18s;box-shadow:0 4px 14px rgba(232,93,38,0.3);}
+.btn-save:hover{background:#d44d18;transform:translateY(-1px);}
+
+/* REQUESTS in admin modal */
+.req-list{display:flex;flex-direction:column;gap:0.5rem;margin-top:0.5rem;}
+.req-item{background:#faf5ff;border:1.5px solid #e9d5ff;border-radius:10px;padding:0.7rem;display:flex;align-items:flex-start;justify-content:space-between;gap:0.5rem;}
+.req-centre{font-family:'Syne',sans-serif;font-size:0.78rem;font-weight:700;color:#7c3aed;}
+.req-msg{font-size:0.75rem;color:var(--muted);margin-top:2px;}
+.req-time{font-size:0.65rem;color:var(--border);margin-top:2px;}
+.btn-req-del{background:none;border:none;cursor:pointer;color:#c4b5fd;font-size:0.9rem;flex-shrink:0;padding:2px;}
+.btn-req-del:hover{color:#7c3aed;}
+
+/* PUBLIC */
+.pub-hero{background:var(--ink);color:white;border-radius:18px;padding:1.6rem 1.8rem;margin-bottom:1.6rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;}
+.pub-hero h2{font-family:'Syne',sans-serif;font-size:1.3rem;font-weight:800;}
+.pub-hero p{color:rgba(255,255,255,0.5);font-size:0.82rem;margin-top:0.25rem;}
+.share-btn{background:rgba(255,255,255,0.08);border:1.5px solid rgba(255,255,255,0.15);border-radius:11px;padding:0.55rem 1rem;color:white;font-size:0.8rem;display:flex;align-items:center;gap:0.5rem;cursor:pointer;transition:all 0.18s;font-family:'DM Sans',sans-serif;}
+.share-btn:hover{background:rgba(255,255,255,0.16);}
+.avail-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.9rem;margin-top:1.3rem;}
+.avail-card{background:white;border-radius:14px;padding:1rem;box-shadow:var(--shadow);border-left:4px solid transparent;transition:transform 0.18s;}
+.avail-card:hover{transform:translateY(-2px);}
+.avail-card.free{border-left-color:var(--free);}.avail-card.partial{border-left-color:var(--partial);}
+.avail-d{font-family:'Syne',sans-serif;font-weight:700;font-size:0.9rem;color:var(--ink);text-transform:capitalize;}
+.avail-slots{display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.5rem;}
+.avail-slot{background:#eef4fc;color:var(--accent2);font-size:0.68rem;font-weight:600;padding:2px 7px;border-radius:6px;}
+.avail-note{font-size:0.75rem;color:var(--muted);margin-top:0.4rem;font-style:italic;}
+.empty-state{text-align:center;padding:3rem 1.5rem;color:var(--muted);}
+.empty-state h3{font-family:'Syne',sans-serif;font-size:1rem;margin-bottom:0.4rem;color:var(--ink);}
+
+/* CENTRE VIEW */
+.centre-hero{background:linear-gradient(135deg,#1a1a2e,#2d1b69);color:white;border-radius:18px;padding:1.6rem 1.8rem;margin-bottom:1.6rem;}
+.centre-hero h2{font-family:'Syne',sans-serif;font-size:1.2rem;font-weight:800;}
+.centre-hero p{color:rgba(255,255,255,0.5);font-size:0.82rem;margin-top:0.25rem;}
+.centre-name-badge{background:rgba(168,85,247,0.3);border:1px solid rgba(168,85,247,0.5);color:#e9d5ff;font-size:0.8rem;font-weight:600;padding:4px 12px;border-radius:50px;display:inline-block;margin-top:0.6rem;}
+
+/* REQUEST MODAL */
+.req-overlay{position:fixed;inset:0;background:rgba(15,25,35,0.75);backdrop-filter:blur(6px);z-index:250;display:none;align-items:center;justify-content:center;padding:1rem;}
+.req-overlay.open{display:flex;}
+.req-modal{background:white;border-radius:22px;padding:1.8rem;max-width:420px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,0.25);animation:slideIn 0.28s ease;}
+.req-modal-date{font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:800;color:var(--ink);text-transform:capitalize;margin-bottom:0.2rem;}
+.req-modal-sub{color:var(--muted);font-size:0.8rem;margin-bottom:1.3rem;}
+.req-slot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0.4rem;margin-bottom:1rem;}
+.req-textarea{width:100%;border:1.5px solid var(--border);border-radius:11px;padding:0.65rem 0.9rem;font-family:'DM Sans',sans-serif;font-size:0.85rem;color:#1a1a2e;resize:none;height:80px;outline:none;transition:border-color 0.18s;margin-bottom:1rem;}
+.req-textarea:focus{border-color:#a855f7;}
+.btn-req-send{width:100%;padding:0.8rem;border:none;border-radius:11px;background:linear-gradient(135deg,#7c3aed,#a855f7);color:white;font-family:'Syne',sans-serif;font-size:0.95rem;font-weight:700;cursor:pointer;transition:all 0.18s;box-shadow:0 4px 14px rgba(124,58,237,0.3);}
+.btn-req-send:hover{transform:translateY(-1px);}
+
+/* ADMIN CENTRES PANEL */
+.admin-section{background:white;border-radius:18px;padding:1.5rem;box-shadow:var(--shadow);margin-top:1.5rem;}
+.admin-section-title{font-family:'Syne',sans-serif;font-size:1rem;font-weight:800;color:var(--ink);margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;}
+.centres-list{display:flex;flex-direction:column;gap:0.6rem;margin-bottom:1rem;}
+.centre-row{display:flex;align-items:center;justify-content:space-between;background:#f9f8f6;border-radius:10px;padding:0.7rem 1rem;}
+.centre-info{display:flex;flex-direction:column;}
+.centre-row-name{font-family:'Syne',sans-serif;font-weight:700;font-size:0.88rem;color:var(--ink);}
+.centre-row-code{font-size:0.72rem;color:var(--muted);}
+.centre-actions{display:flex;gap:0.4rem;}
+.btn-sm{padding:0.35rem 0.8rem;border-radius:8px;border:1.5px solid var(--border);background:white;font-size:0.72rem;font-weight:600;cursor:pointer;transition:all 0.18s;color:var(--ink);}
+.btn-sm:hover{border-color:var(--ink);}
+.btn-sm.danger{border-color:#fee2e2;color:#ef4444;}
+.btn-sm.danger:hover{background:#fee2e2;}
+
+.add-centre-form{display:grid;grid-template-columns:1fr 1fr auto;gap:0.5rem;align-items:end;}
+.form-group{display:flex;flex-direction:column;gap:0.3rem;}
+.form-label{font-size:0.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.3px;}
+.form-input{border:1.5px solid var(--border);border-radius:9px;padding:0.55rem 0.8rem;font-family:'DM Sans',sans-serif;font-size:0.85rem;color:var(--ink);outline:none;transition:border-color 0.18s;}
+.form-input:focus{border-color:var(--accent2);}
+.btn-add{padding:0.55rem 1rem;border:none;border-radius:9px;background:var(--accent);color:white;font-family:'Syne',sans-serif;font-size:0.82rem;font-weight:700;cursor:pointer;white-space:nowrap;}
+
+/* REQUESTS PANEL */
+.requests-panel{margin-top:1.5rem;}
+.centre-req-block{background:white;border-radius:14px;padding:1.2rem;box-shadow:var(--shadow);margin-bottom:1rem;}
+.centre-req-title{font-family:'Syne',sans-serif;font-weight:700;font-size:0.9rem;color:#7c3aed;margin-bottom:0.7rem;display:flex;align-items:center;gap:0.4rem;}
+.req-card{background:#faf5ff;border:1.5px solid #e9d5ff;border-radius:10px;padding:0.8rem;margin-bottom:0.5rem;display:flex;justify-content:space-between;align-items:flex-start;}
+.req-card-left{}
+.req-card-date{font-family:'Syne',sans-serif;font-weight:700;font-size:0.82rem;color:var(--ink);text-transform:capitalize;}
+.req-card-slots{display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.3rem;}
+.req-card-slot{background:#ede9fe;color:#7c3aed;font-size:0.65rem;font-weight:600;padding:1px 6px;border-radius:5px;}
+.req-card-msg{font-size:0.75rem;color:var(--muted);margin-top:0.3rem;font-style:italic;}
+.req-card-time{font-size:0.62rem;color:#c4b5fd;margin-top:0.2rem;}
+.btn-req-done{padding:0.3rem 0.7rem;border:1.5px solid #d1fae5;border-radius:7px;background:white;color:#059669;font-size:0.7rem;font-weight:600;cursor:pointer;transition:all 0.18s;flex-shrink:0;}
+.btn-req-done:hover{background:#d1fae5;}
+
+/* TOAST */
+.toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(80px);background:var(--ink);color:white;padding:0.7rem 1.3rem;border-radius:50px;font-size:0.85rem;font-weight:500;z-index:999;transition:transform 0.32s cubic-bezier(0.34,1.56,0.64,1);white-space:nowrap;}
+.toast.show{transform:translateX(-50%) translateY(0);}
+
+/* PIN */
+.pin-overlay{position:fixed;inset:0;background:rgba(15,25,35,0.85);backdrop-filter:blur(8px);z-index:300;display:flex;align-items:center;justify-content:center;padding:1rem;}
+.pin-box{background:white;border-radius:24px;padding:2rem;max-width:320px;width:100%;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,0.3);animation:slideIn 0.28s ease;}
+.pin-icon{font-size:2.5rem;margin-bottom:0.8rem;}
+.pin-title{font-family:'Syne',sans-serif;font-size:1.2rem;font-weight:800;color:var(--ink);margin-bottom:0.3rem;}
+.pin-sub{color:var(--muted);font-size:0.82rem;margin-bottom:1.5rem;}
+.pin-dots{display:flex;gap:0.6rem;justify-content:center;margin-bottom:1.5rem;}
+.pin-dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--border);background:white;transition:all 0.2s;}
+.pin-dot.filled{background:var(--accent);border-color:var(--accent);}
+.pin-dot.filled-purple{background:#7c3aed;border-color:#7c3aed;}
+.pin-dot.error{background:#ef4444;border-color:#ef4444;animation:shake 0.4s ease;}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.pin-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:0.6rem;}
+.pin-key{padding:0.9rem;border-radius:14px;border:1.5px solid var(--border);background:white;font-family:'Syne',sans-serif;font-size:1.2rem;font-weight:700;cursor:pointer;transition:all 0.15s;color:var(--ink);}
+.pin-key:hover{background:#f4f1eb;border-color:var(--accent);}
+.pin-key:active{transform:scale(0.94);}
+.pin-key.del{font-size:1rem;color:var(--muted);}
+.pin-key.purple:hover{border-color:#7c3aed;}
+.pin-error-msg{color:#ef4444;font-size:0.78rem;margin-top:0.8rem;font-weight:500;min-height:1.2em;}
+
+@media(max-width:600px){
+  .day-cell{min-height:58px;padding:0.3rem;}
+  .day-num{font-size:0.72rem;}
+  .status-lbl{display:none;}
+  .modal{padding:1.3rem;}
+  .header-right .sync{display:none;}
+  .add-centre-form{grid-template-columns:1fr;gap:0.4rem;}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Mon<span>Planning</span></div>
+  <div class="header-right">
+    <div class="sync"><div class="sync-dot" id="syncDot"></div><span id="syncLbl">Connexion...</span></div>
+    <div class="tabs">
+      <button class="tab" id="tabAdmin" onclick="askPin('admin')">🔒 Formateur</button>
+      <button class="tab active" id="tabPublic" onclick="switchMode('public')">👁 Centres</button>
+      <button class="tab" id="tabCentre" onclick="askPin('centre')" style="display:none">🏢 Mon espace</button>
+    </div>
+  </div>
+</header>
+
+<!-- ===== VUE FORMATEUR ===== -->
+<div id="adminView" class="view">
+  <div class="container">
+    <div class="hero">
+      <h1>Gérez vos disponibilités</h1>
+      <p>Cliquez sur un jour · Les centres voient tout en temps réel</p>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="dot free"></div> Disponible</div>
+      <div class="legend-item"><div class="dot partial"></div> Partiel</div>
+      <div class="legend-item"><div class="dot busy"></div> Occupé</div>
+      <div class="legend-item"><div class="dot requested"></div> Demande reçue</div>
+    </div>
+    <div class="month-nav">
+      <button class="arrow" onclick="changeMonth(-1)">←</button>
+      <h2 id="monthTitleAdmin"></h2>
+      <button class="arrow" onclick="changeMonth(1)">→</button>
+    </div>
+    <div class="cal-wrap">
+      <div class="day-headers">
+        <div class="day-header">Lun</div><div class="day-header">Mar</div>
+        <div class="day-header">Mer</div><div class="day-header">Jeu</div>
+        <div class="day-header">Ven</div><div class="day-header">Sam</div>
+        <div class="day-header">Dim</div>
+      </div>
+      <div class="days-grid" id="gridAdmin"></div>
+    </div>
+
+    <!-- Centres management -->
+    <div class="admin-section">
+      <div class="admin-section-title">🏢 Gérer les centres</div>
+      <div class="centres-list" id="centresList"></div>
+      <div class="add-centre-form">
+        <div class="form-group">
+          <label class="form-label">Nom du centre</label>
+          <input class="form-input" id="newCentreName" placeholder="Ex: AFPA Lyon" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Code secret</label>
+          <input class="form-input" id="newCentreCode" placeholder="Ex: 5678" maxlength="6" />
+        </div>
+        <button class="btn-add" onclick="addCentre()">+ Ajouter</button>
+      </div>
+    </div>
+
+    <!-- Requests panel -->
+    <div class="requests-panel" id="requestsPanel"></div>
+  </div>
+</div>
+
+<!-- ===== VUE PUBLIQUE ===== -->
+<div id="publicView" class="view active">
+  <div class="container">
+    <div class="pub-hero">
+      <div>
+        <h2>Disponibilités du Formateur</h2>
+        <p>Mise à jour automatique · Temps réel</p>
+      </div>
+      <button class="share-btn" onclick="copyLink()">🔗 Copier le lien</button>
+    </div>
+    <div class="month-nav">
+      <button class="arrow" onclick="changeMonth(-1)">←</button>
+      <h2 id="monthTitlePublic"></h2>
+      <button class="arrow" onclick="changeMonth(1)">→</button>
+    </div>
+    <div class="cal-wrap">
+      <div class="day-headers">
+        <div class="day-header">Lun</div><div class="day-header">Mar</div>
+        <div class="day-header">Mer</div><div class="day-header">Jeu</div>
+        <div class="day-header">Ven</div><div class="day-header">Sam</div>
+        <div class="day-header">Dim</div>
+      </div>
+      <div class="days-grid" id="gridPublic"></div>
+    </div>
+    <div id="availCards" class="avail-cards"></div>
+
+    <div style="text-align:center;margin-top:2rem;padding:1.2rem;background:white;border-radius:14px;box-shadow:var(--shadow);">
+      <div style="font-size:1.3rem;margin-bottom:0.4rem;">🏢</div>
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:0.9rem;color:var(--ink);margin-bottom:0.3rem;">Vous êtes un centre de formation ?</div>
+      <div style="font-size:0.8rem;color:var(--muted);margin-bottom:0.8rem;">Connectez-vous avec votre code pour faire une demande de réservation.</div>
+      <button onclick="askPin('centre')" style="padding:0.6rem 1.4rem;border:none;border-radius:50px;background:linear-gradient(135deg,#7c3aed,#a855f7);color:white;font-family:'Syne',sans-serif;font-size:0.85rem;font-weight:700;cursor:pointer;">Se connecter →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== VUE CENTRE ===== -->
+<div id="centreView" class="view">
+  <div class="container">
+    <div class="centre-hero">
+      <h2>Espace Centre</h2>
+      <p>Consultez les disponibilités et faites vos demandes</p>
+      <div class="centre-name-badge" id="centreNameBadge">Centre</div>
+    </div>
+    <div class="month-nav">
+      <button class="arrow" onclick="changeMonth(-1)">←</button>
+      <h2 id="monthTitleCentre"></h2>
+      <button class="arrow" onclick="changeMonth(1)">→</button>
+    </div>
+    <div class="cal-wrap">
+      <div class="day-headers">
+        <div class="day-header">Lun</div><div class="day-header">Mar</div>
+        <div class="day-header">Mer</div><div class="day-header">Jeu</div>
+        <div class="day-header">Ven</div><div class="day-header">Sam</div>
+        <div class="day-header">Dim</div>
+      </div>
+      <div class="days-grid" id="gridCentre"></div>
+    </div>
+    <!-- My requests -->
+    <div style="margin-top:1.5rem;" id="myRequestsSection"></div>
+  </div>
+</div>
+
+<!-- MODAL ADMIN (edit day) -->
+<div class="overlay" id="overlay" onclick="closeModalOnBg(event)">
+  <div class="modal">
+    <div class="modal-date" id="modalDate"></div>
+    <div class="modal-sub">Définir votre disponibilité</div>
+    <div class="status-grid">
+      <div class="status-btn" id="btnFree" onclick="selectStatus('free')"><div class="s-icon">✅</div><div class="s-lbl">Disponible</div></div>
+      <div class="status-btn" id="btnPartial" onclick="selectStatus('partial')"><div class="s-icon">⏳</div><div class="s-lbl">Partiel</div></div>
+      <div class="status-btn" id="btnBusy" onclick="selectStatus('busy')"><div class="s-icon">🚫</div><div class="s-lbl">Occupé</div></div>
+    </div>
+    <div class="slots-section" id="slotsSection" style="display:none">
+      <div class="slots-title">Créneaux disponibles</div>
+      <div class="slots-grid">
+        <div class="slot-chip" onclick="toggleSlot(this)">Matin</div>
+        <div class="slot-chip" onclick="toggleSlot(this)">Après-midi</div>
+        <div class="slot-chip" onclick="toggleSlot(this)">Journée entière</div>
+        <div class="slot-chip" onclick="toggleSlot(this)">8h–10h</div>
+        <div class="slot-chip" onclick="toggleSlot(this)">10h–12h</div>
+        <div class="slot-chip" onclick="toggleSlot(this)">14h–16h</div>
+        <div class="slot-chip" onclick="toggleSlot(this)">16h–18h</div>
+        <div class="slot-chip" onclick="toggleSlot(this)">Soir</div>
+        <div class="slot-chip" onclick="toggleSlot(this)">Sur demande</div>
+      </div>
+    </div>
+    <textarea class="note" id="noteInput" placeholder="Note optionnelle..."></textarea>
+    <!-- Requests on this day -->
+    <div id="modalRequests"></div>
+    <div class="modal-actions">
+      <button class="btn-del" id="btnDel" onclick="deleteDay()" style="display:none">🗑</button>
+      <button class="btn-cancel" onclick="closeModal()">Annuler</button>
+      <button class="btn-save" onclick="saveDay()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CENTRE (request) -->
+<div class="req-overlay" id="reqOverlay" onclick="closeReqModalOnBg(event)">
+  <div class="req-modal">
+    <div class="req-modal-date" id="reqModalDate"></div>
+    <div class="req-modal-sub">Faire une demande de réservation</div>
+    <div class="slots-title">Créneaux souhaités</div>
+    <div class="req-slot-grid">
+      <div class="slot-chip" onclick="toggleReqSlot(this)">Matin</div>
+      <div class="slot-chip" onclick="toggleReqSlot(this)">Après-midi</div>
+      <div class="slot-chip" onclick="toggleReqSlot(this)">Journée entière</div>
+      <div class="slot-chip" onclick="toggleReqSlot(this)">8h–10h</div>
+      <div class="slot-chip" onclick="toggleReqSlot(this)">10h–12h</div>
+      <div class="slot-chip" onclick="toggleReqSlot(this)">14h–16h</div>
+      <div class="slot-chip" onclick="toggleReqSlot(this)">16h–18h</div>
+      <div class="slot-chip" onclick="toggleReqSlot(this)">Soir</div>
+      <div class="slot-chip" onclick="toggleReqSlot(this)">Sur demande</div>
+    </div>
+    <textarea class="req-textarea" id="reqMessage" placeholder="Message pour le formateur (optionnel)..."></textarea>
+    <button class="btn-req-send" onclick="sendRequest()">Envoyer la demande 📨</button>
+    <button class="btn-cancel" style="width:100%;margin-top:0.5rem;" onclick="closeReqModal()">Annuler</button>
+  </div>
+</div>
+
+<!-- PIN MODAL -->
+<div class="pin-overlay" id="pinOverlay" style="display:none">
+  <div class="pin-box">
+    <div class="pin-icon" id="pinIcon">🔐</div>
+    <div class="pin-title" id="pinTitle">Accès Formateur</div>
+    <div class="pin-sub" id="pinSub">Code PIN à 4 chiffres</div>
+    <div class="pin-dots" id="pinDots">
+      <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div><div class="pin-dot" id="pd3"></div>
+    </div>
+    <div class="pin-keypad">
+      <button class="pin-key" onclick="pinPress('1')">1</button>
+      <button class="pin-key" onclick="pinPress('2')">2</button>
+      <button class="pin-key" onclick="pinPress('3')">3</button>
+      <button class="pin-key" onclick="pinPress('4')">4</button>
+      <button class="pin-key" onclick="pinPress('5')">5</button>
+      <button class="pin-key" onclick="pinPress('6')">6</button>
+      <button class="pin-key" onclick="pinPress('7')">7</button>
+      <button class="pin-key" onclick="pinPress('8')">8</button>
+      <button class="pin-key" onclick="pinPress('9')">9</button>
+      <button class="pin-key" onclick="pinCancel()">✕</button>
+      <button class="pin-key" onclick="pinPress('0')">0</button>
+      <button class="pin-key del" onclick="pinDelete()">⌫</button>
+    </div>
+    <div class="pin-error-msg" id="pinError"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const MONTHS_LOW = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+const DAY_NAMES = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+const DAY_NAMES_LOW = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+
+// =====================
+// CHANGE YOUR ADMIN PIN
+const ADMIN_PIN = '2013';
+// =====================
+
+let mode = 'public';
+let today = new Date();
+let curYear = today.getFullYear();
+let curMonth = today.getMonth();
+let selKey = null, selStatus = null, selSlots = [];
+let reqKey = null, reqSlots = [];
+let pinMode = 'admin'; // 'admin' or 'centre'
+let pinUnlocked = false;
+let currentCentreCode = null;
+let currentCentreName = null;
+
+window.planning = {};
+window.requests = {};
+window.centresConfig = {};
+
+function dk(y,m,d){ return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; }
+
+function switchMode(m) {
+  mode = m;
+  ['admin','public','centre'].forEach(v => {
+    document.getElementById(v+'View').classList.toggle('active', m===v);
+  });
+  document.getElementById('tabAdmin').classList.toggle('active', m==='admin');
+  document.getElementById('tabPublic').classList.toggle('active', m==='public');
+  document.getElementById('tabCentre').classList.toggle('active', m==='centre');
+  if(m==='admin') document.getElementById('tabAdmin').textContent = '✏️ Formateur';
+  renderCalendar();
+}
+
+function changeMonth(dir) {
+  curMonth += dir;
+  if(curMonth>11){curMonth=0;curYear++;}
+  if(curMonth<0){curMonth=11;curYear--;}
+  renderCalendar();
+}
+
+window.renderCalendar = function() {
+  const title = `${MONTHS[curMonth]} ${curYear}`;
+  ['Admin','Public','Centre'].forEach(s => {
+    const el = document.getElementById('monthTitle'+s);
+    if(el) el.textContent = title;
+  });
+  buildGrid('gridAdmin', 'admin');
+  buildGrid('gridPublic', 'public');
+  buildGrid('gridCentre', 'centre');
+  buildCards();
+  renderAdminCentres();
+  renderRequests();
+  renderMyRequests();
+};
+
+function hasRequestsOnDay(key) {
+  const reqs = window.requests;
+  for(const code in reqs) {
+    const dayReqs = reqs[code];
+    if(dayReqs && typeof dayReqs === 'object') {
+      for(const id in dayReqs) {
+        if(dayReqs[id].dateKey === key) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function getMyRequestsOnDay(key) {
+  if(!currentCentreCode) return [];
+  const dayReqs = window.requests[currentCentreCode];
+  if(!dayReqs) return [];
+  return Object.entries(dayReqs).filter(([,v]) => v.dateKey === key);
+}
+
+function buildGrid(gridId, viewType) {
+  const grid = document.getElementById(gridId);
+  if(!grid) return;
+  grid.innerHTML = '';
+  const firstDay = new Date(curYear, curMonth, 1).getDay();
+  const offset = firstDay===0 ? 6 : firstDay-1;
+  const daysInMonth = new Date(curYear, curMonth+1, 0).getDate();
+  const todayKey = dk(today.getFullYear(), today.getMonth(), today.getDate());
+
+  for(let i=0;i<offset;i++){
+    const el=document.createElement('div'); el.className='day-cell empty'; grid.appendChild(el);
+  }
+
+  for(let d=1;d<=daysInMonth;d++){
+    const key=dk(curYear,curMonth,d);
+    const data=window.planning[key];
+    const isToday=key===todayKey;
+    const dt=new Date(curYear,curMonth,d);
+    const isPast=dt<new Date(today.getFullYear(),today.getMonth(),today.getDate());
+    const hasReqs=hasRequestsOnDay(key);
+    const myReqs=getMyRequestsOnDay(key);
+
+    const cell=document.createElement('div');
+    cell.className=`day-cell${isToday?' is-today':''}${isPast?' past':''}`;
+
+    const num=document.createElement('div'); num.className='day-num'; num.textContent=d; cell.appendChild(num);
+
+    if(data){
+      const bar=document.createElement('div'); bar.className=`status-bar ${data.status}`; cell.appendChild(bar);
+      const lbl=document.createElement('div'); lbl.className='status-lbl';
+      lbl.textContent=data.status==='free'?'Disponible':data.status==='partial'?'Partiel':'Occupé';
+      cell.appendChild(lbl);
+      if(data.slots&&data.slots.length){
+        const sp=document.createElement('div'); sp.className='slots-prev';
+        sp.textContent=data.slots.slice(0,2).join(', '); cell.appendChild(sp);
+      }
+    }
+
+    if(viewType==='admin' && hasReqs){
+      const badge=document.createElement('div'); badge.className='req-badge'; badge.textContent='📨 demande'; cell.appendChild(badge);
+    }
+    if(viewType==='centre' && myReqs.length>0){
+      const badge=document.createElement('div'); badge.className='req-badge'; badge.style.background='#7c3aed'; badge.textContent='✓ envoyé'; cell.appendChild(badge);
+    }
+
+    if(viewType==='admin' && !isPast) cell.onclick=()=>openModal(key,d);
+    else if(viewType==='centre' && !isPast && data && data.status!=='busy') cell.onclick=()=>openReqModal(key,d);
+    grid.appendChild(cell);
+  }
+}
+
+function buildCards() {
+  const container=document.getElementById('availCards');
+  if(!container) return;
+  const entries=Object.entries(window.planning)
+    .filter(([k,v])=>{ const [y,m]=k.split('-').map(Number); return y===curYear&&m===curMonth+1&&v.status!=='busy'; })
+    .sort(([a],[b])=>a.localeCompare(b));
+  if(!entries.length){
+    container.innerHTML=`<div class="empty-state"><h3>Aucune disponibilité ce mois</h3><p>Revenez plus tard.</p></div>`;
+    return;
+  }
+  container.innerHTML=entries.map(([key,data])=>{
+    const[y,m,d]=key.split('-').map(Number);
+    const dt=new Date(y,m-1,d);
+    const dayName=DAY_NAMES_LOW[dt.getDay()];
+    const slots=data.slots&&data.slots.length?`<div class="avail-slots">${data.slots.map(s=>`<span class="avail-slot">${s}</span>`).join('')}</div>`:'';
+    const note=data.note?`<div class="avail-note">💬 ${data.note}</div>`:'';
+    return `<div class="avail-card ${data.status}"><div class="avail-d">${dayName} ${d} ${MONTHS_LOW[m-1]}</div>${slots}${note}</div>`;
+  }).join('');
+}
+
+// ADMIN MODAL
+function openModal(key,d) {
+  selKey=key;
+  const data=window.planning[key]||{};
+  const[y,m]=key.split('-').map(Number);
+  const dt=new Date(y,m-1,d);
+  document.getElementById('modalDate').textContent=`${DAY_NAMES[dt.getDay()]} ${d} ${MONTHS_LOW[m-1]} ${y}`;
+  selStatus=data.status||null; selSlots=data.slots?[...data.slots]:[];
+  document.getElementById('noteInput').value=data.note||'';
+  document.getElementById('btnDel').style.display=data.status?'block':'none';
+  updateStatusBtns(); updateSlotChips();
+  // Show requests for this day
+  renderModalRequests(key);
+  document.getElementById('overlay').classList.add('open');
+}
+
+function renderModalRequests(key) {
+  const container=document.getElementById('modalRequests');
+  const allReqs=[];
+  for(const code in window.requests){
+    const centreReqs=window.requests[code];
+    if(!centreReqs) continue;
+    const centreName=window.centresConfig[code]?.name||code;
+    for(const id in centreReqs){
+      if(centreReqs[id].dateKey===key) allReqs.push({code,id,name:centreName,...centreReqs[id]});
+    }
+  }
+  if(!allReqs.length){container.innerHTML='';return;}
+  container.innerHTML=`<div class="modal-section-title">📨 Demandes reçues (${allReqs.length})</div><div class="req-list">${
+    allReqs.map(r=>`<div class="req-item">
+      <div><div class="req-centre">${r.name}</div>
+      ${r.slots&&r.slots.length?`<div class="req-msg">Créneaux: ${r.slots.join(', ')}</div>`:''}
+      ${r.message?`<div class="req-msg">💬 ${r.message}</div>`:''}
+      <div class="req-time">${new Date(r.ts).toLocaleDateString('fr-FR')}</div></div>
+      <button class="btn-req-del" onclick="deleteRequest('${r.code}','${r.id}')">✕</button>
+    </div>`).join('')
+  }</div>`;
+}
+
+function closeModal(){
+  document.getElementById('overlay').classList.remove('open');
+  selKey=null;selStatus=null;selSlots=[];
+}
+function closeModalOnBg(e){if(e.target===document.getElementById('overlay'))closeModal();}
+function selectStatus(s){selStatus=s;updateStatusBtns();}
+function updateStatusBtns(){
+  ['free','partial','busy'].forEach(s=>{
+    document.getElementById(`btn${s.charAt(0).toUpperCase()+s.slice(1)}`).className=`status-btn${selStatus===s?' sel-'+s:''}`;
+  });
+  document.getElementById('slotsSection').style.display=(selStatus==='free'||selStatus==='partial')?'block':'none';
+}
+function toggleSlot(el){
+  const s=el.textContent;
+  if(selSlots.includes(s))selSlots=selSlots.filter(x=>x!==s);else selSlots.push(s);
+  updateSlotChips();
+}
+function updateSlotChips(){document.querySelectorAll('#overlay .slot-chip').forEach(c=>c.classList.toggle('active',selSlots.includes(c.textContent)));}
+
+async function saveDay(){
+  if(!selStatus){showToast('⚠️ Choisissez un statut !');return;}
+  const note=document.getElementById('noteInput').value.trim();
+  const data={status:selStatus,slots:[...selSlots],note};
+  window.planning[selKey]=data; closeModal(); renderCalendar();
+  try{await window.firebaseSave(selKey,data);showToast('✅ Sauvegardé en ligne !');}
+  catch(e){showToast('⚠️ Erreur de sauvegarde');}
+}
+async function deleteDay(){
+  delete window.planning[selKey]; const k=selKey; closeModal(); renderCalendar();
+  try{await window.firebaseDelete(k);showToast('🗑 Jour effacé');}catch(e){}
+}
+
+// CENTRE REQUEST MODAL
+function openReqModal(key,d){
+  reqKey=key; reqSlots=[];
+  const[y,m]=key.split('-').map(Number);
+  const dt=new Date(y,m-1,d);
+  document.getElementById('reqModalDate').textContent=`${DAY_NAMES[dt.getDay()]} ${d} ${MONTHS_LOW[m-1]} ${y}`;
+  document.getElementById('reqMessage').value='';
+  document.querySelectorAll('#reqOverlay .slot-chip').forEach(c=>c.classList.remove('active'));
+  document.getElementById('reqOverlay').classList.add('open');
+}
+function closeReqModal(){document.getElementById('reqOverlay').classList.remove('open');reqKey=null;reqSlots=[];}
+function closeReqModalOnBg(e){if(e.target===document.getElementById('reqOverlay'))closeReqModal();}
+function toggleReqSlot(el){
+  const s=el.textContent;
+  if(reqSlots.includes(s))reqSlots=reqSlots.filter(x=>x!==s);else reqSlots.push(s);
+  el.classList.toggle('active',reqSlots.includes(s));
+}
+async function sendRequest(){
+  if(!currentCentreCode){showToast('Erreur: centre non identifié');return;}
+  const message=document.getElementById('reqMessage').value.trim();
+  const data={dateKey:reqKey,slots:[...reqSlots],message,ts:Date.now(),centreName:currentCentreName};
+  closeReqModal();
+  try{
+    await window.firebasePushRequest(currentCentreCode,data);
+    showToast('📨 Demande envoyée au formateur !');
+    renderCalendar();
+  }catch(e){showToast('⚠️ Erreur envoi');}
+}
+
+async function deleteRequest(centreCode,reqId){
+  try{
+    await window.firebaseDeleteRequest(centreCode,reqId);
+    showToast('✅ Demande traitée');
+    renderCalendar();
+  }catch(e){}
+}
+
+// ADMIN CENTRES MANAGEMENT
+function renderAdminCentres(){
+  const list=document.getElementById('centresList');
+  if(!list) return;
+  const centres=window.centresConfig;
+  if(!Object.keys(centres).length){
+    list.innerHTML=`<div style="font-size:0.82rem;color:var(--muted);padding:0.5rem 0;">Aucun centre ajouté. Ajoutez des centres ci-dessous.</div>`;
+    return;
+  }
+  list.innerHTML=Object.entries(centres).map(([code,c])=>`
+    <div class="centre-row">
+      <div class="centre-info">
+        <div class="centre-row-name">${c.name}</div>
+        <div class="centre-row-code">Code: <strong>${code}</strong></div>
+      </div>
+      <div class="centre-actions">
+        <button class="btn-sm danger" onclick="removeCentre('${code}')">Supprimer</button>
+      </div>
+    </div>`).join('');
+}
+
+async function addCentre(){
+  const name=document.getElementById('newCentreName').value.trim();
+  const code=document.getElementById('newCentreCode').value.trim();
+  if(!name||!code){showToast('⚠️ Remplissez le nom et le code');return;}
+  if(window.centresConfig[code]){showToast('⚠️ Ce code existe déjà');return;}
+  try{
+    await window.firebaseSaveCentre(code,{name});
+    document.getElementById('newCentreName').value='';
+    document.getElementById('newCentreCode').value='';
+    showToast(`✅ Centre "${name}" ajouté`);
+  }catch(e){showToast('⚠️ Erreur');}
+}
+
+async function removeCentre(code){
+  try{await window.firebaseDeleteCentre(code);showToast('🗑 Centre supprimé');}catch(e){}
+}
+
+// REQUESTS PANEL (admin)
+window.renderRequests = function(){
+  const panel=document.getElementById('requestsPanel');
+  if(!panel) return;
+  const reqs=window.requests;
+  const allEntries=[];
+  for(const code in reqs){
+    const centreReqs=reqs[code];
+    if(!centreReqs) continue;
+    const centreName=window.centresConfig[code]?.name||code;
+    const items=Object.entries(centreReqs).map(([id,v])=>({id,code,centreName,...v}));
+    if(items.length) allEntries.push({code,centreName,items});
+  }
+  if(!allEntries.length){panel.innerHTML='';return;}
+  panel.innerHTML=`<div class="admin-section"><div class="admin-section-title">📨 Toutes les demandes</div>${
+    allEntries.map(({centreName,code,items})=>`
+      <div class="centre-req-block">
+        <div class="centre-req-title">🏢 ${centreName}</div>
+        ${items.map(r=>{
+          const[y,m,d]=r.dateKey.split('-').map(Number);
+          const dt=new Date(y,m-1,d);
+          const dn=DAY_NAMES_LOW[dt.getDay()];
+          return `<div class="req-card">
+            <div class="req-card-left">
+              <div class="req-card-date">${dn} ${d} ${MONTHS_LOW[m-1]}</div>
+              ${r.slots&&r.slots.length?`<div class="req-card-slots">${r.slots.map(s=>`<span class="req-card-slot">${s}</span>`).join('')}</div>`:''}
+              ${r.message?`<div class="req-card-msg">💬 ${r.message}</div>`:''}
+              <div class="req-card-time">${new Date(r.ts).toLocaleDateString('fr-FR',{day:'numeric',month:'long'})}</div>
+            </div>
+            <button class="btn-req-done" onclick="deleteRequest('${code}','${r.id}')">✓ Traité</button>
+          </div>`;
+        }).join('')}
+      </div>`).join('')
+  }</div>`;
+};
+
+// MY REQUESTS (centre view)
+function renderMyRequests(){
+  const section=document.getElementById('myRequestsSection');
+  if(!section||!currentCentreCode) return;
+  const centreReqs=window.requests[currentCentreCode];
+  if(!centreReqs||!Object.keys(centreReqs).length){
+    section.innerHTML=`<div style="text-align:center;padding:1.5rem;background:white;border-radius:14px;box-shadow:var(--shadow);"><div style="color:var(--muted);font-size:0.85rem;">Vous n'avez pas encore fait de demande.<br>Cliquez sur un jour disponible pour en faire une.</div></div>`;
+    return;
+  }
+  const items=Object.entries(centreReqs).sort(([,a],[,b])=>a.ts-b.ts);
+  section.innerHTML=`<div class="admin-section"><div class="admin-section-title">📋 Mes demandes</div>${
+    items.map(([id,r])=>{
+      const[y,m,d]=r.dateKey.split('-').map(Number);
+      const dt=new Date(y,m-1,d);
+      const dn=DAY_NAMES_LOW[dt.getDay()];
+      return `<div class="req-card">
+        <div class="req-card-left">
+          <div class="req-card-date">${dn} ${d} ${MONTHS_LOW[m-1]}</div>
+          ${r.slots&&r.slots.length?`<div class="req-card-slots">${r.slots.map(s=>`<span class="req-card-slot">${s}</span>`).join('')}</div>`:''}
+          ${r.message?`<div class="req-card-msg">💬 ${r.message}</div>`:''}
+        </div>
+        <button class="btn-req-done" style="border-color:#fee2e2;color:#ef4444;" onclick="cancelMyRequest('${id}')">✕ Annuler</button>
+      </div>`;
+    }).join('')
+  }</div>`;
+}
+
+async function cancelMyRequest(id){
+  try{await window.firebaseDeleteRequest(currentCentreCode,id);showToast('Demande annulée');renderCalendar();}catch(e){}
+}
+
+// PIN SYSTEM
+let pinEntry='';
+let pinTarget='admin';
+
+function askPin(target){
+  pinTarget=target;
+  if(target==='admin'){
+    if(pinUnlocked){switchMode('admin');return;}
+    document.getElementById('pinIcon').textContent='🔐';
+    document.getElementById('pinTitle').textContent='Accès Formateur';
+    document.getElementById('pinSub').textContent='Entrez votre code PIN';
+    document.querySelectorAll('.pin-key').forEach(k=>k.classList.remove('purple'));
+  } else {
+    document.getElementById('pinIcon').textContent='🏢';
+    document.getElementById('pinTitle').textContent='Accès Centre';
+    document.getElementById('pinSub').textContent='Entrez votre code centre';
+    document.querySelectorAll('.pin-key').forEach(k=>k.style.setProperty('--hover-color','#7c3aed'));
+  }
+  pinEntry='';
+  updatePinDots();
+  document.getElementById('pinError').textContent='';
+  document.getElementById('pinOverlay').style.display='flex';
+}
+
+function pinPress(digit){
+  if(pinEntry.length>=6) return;
+  pinEntry+=digit;
+  updatePinDots();
+  if(pinTarget==='admin'&&pinEntry.length===4) setTimeout(checkPin,150);
+  else if(pinTarget==='centre'&&pinEntry.length>=4) setTimeout(()=>{if(pinEntry.length>=4)checkPin();},300);
+}
+function pinDelete(){pinEntry=pinEntry.slice(0,-1);updatePinDots();}
+function pinCancel(){document.getElementById('pinOverlay').style.display='none';pinEntry='';}
+
+function updatePinDots(){
+  const dots=document.getElementById('pinDots');
+  const len=Math.max(4,pinEntry.length);
+  dots.innerHTML='';
+  for(let i=0;i<len;i++){
+    const d=document.createElement('div');
+    d.className='pin-dot'+(i<pinEntry.length?(pinTarget==='centre'?' filled-purple':' filled'):'');
+    dots.appendChild(d);
+  }
+}
+
+function checkPin(){
+  if(pinTarget==='admin'){
+    if(pinEntry===ADMIN_PIN){
+      pinUnlocked=true;
+      document.getElementById('pinOverlay').style.display='none';
+      document.getElementById('tabAdmin').textContent='✏️ Formateur';
+      switchMode('admin');
+      showToast('✅ Accès Formateur activé');
+    } else {
+      showPinError();
+    }
+  } else {
+    // Check centre codes
+    const found=Object.entries(window.centresConfig).find(([code])=>code===pinEntry);
+    if(found){
+      currentCentreCode=found[0];
+      currentCentreName=found[1].name;
+      document.getElementById('pinOverlay').style.display='none';
+      document.getElementById('centreNameBadge').textContent=currentCentreName;
+      document.getElementById('tabCentre').style.display='block';
+      document.getElementById('tabCentre').textContent=`🏢 ${currentCentreName}`;
+      switchMode('centre');
+      showToast(`✅ Bienvenue ${currentCentreName}`);
+    } else {
+      showPinError();
+    }
+  }
+}
+
+function showPinError(){
+  const dots=document.getElementById('pinDots').querySelectorAll('.pin-dot');
+  dots.forEach(d=>d.className='pin-dot error');
+  document.getElementById('pinError').textContent='Code incorrect, réessayez';
+  setTimeout(()=>{pinEntry='';updatePinDots();document.getElementById('pinError').textContent='';},1000);
+}
+
+function copyLink(){
+  navigator.clipboard.writeText(window.location.href).then(()=>showToast('🔗 Lien copié !'),()=>showToast("Copiez l'URL"));
+}
+function showToast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2800);
+}
+
+renderCalendar();
+</script>
+</body>
+</html>
